@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MEMORY_LAYER // SINCRONIZACIÓN</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=JetBrains+Mono:wght@300;400;500;700;800&display=swap');
+
+:root{
+  --bg:#0a0906;
+  --bg-2:#121009;
+  --amber:#ffb000;
+  --amber-dim:#8a5a1c;
+  --amber-dark:#5c3d00;
+  --bone:#e8e3d8;
+  --blood:#8b1a1a;
+  --blood-bright:#d1362f;
+  --steel:#3a3630;
+  --line:rgba(255,176,0,0.18);
+}
+
+*{box-sizing:border-box; margin:0; padding:0;}
+
+html,body{
+  background:var(--bg);
+  color:var(--bone);
+  font-family:'JetBrains Mono', monospace;
+  overflow-x:hidden;
+  min-height:100%;
+}
+
+body{
+  background-image:
+    radial-gradient(ellipse at 20% -10%, rgba(255,176,0,0.05), transparent 45%),
+    radial-gradient(ellipse at 90% 110%, rgba(139,26,26,0.06), transparent 50%);
+  position:relative;
+}
+
+/* film grain / noise */
+.grain{
+  position:fixed; inset:0; pointer-events:none; z-index:120;
+  opacity:0.05; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* scanlines */
+.scanlines{
+  position:fixed; inset:0; pointer-events:none; z-index:119;
+  background:repeating-linear-gradient(
+    to bottom,
+    rgba(0,0,0,0) 0px,
+    rgba(0,0,0,0.12) 1px,
+    rgba(0,0,0,0) 2px
+  );
+  opacity:0.5;
+}
+
+.vignette{
+  position:fixed; inset:0; pointer-events:none; z-index:118;
+  box-shadow: inset 0 0 18vw rgba(0,0,0,0.75);
+}
+
+/* ============ TOP BAR ============ */
+.topbar{
+  position:relative; z-index:5;
+  display:flex; justify-content:space-between; align-items:center;
+  padding:14px clamp(16px,4vw,40px);
+  border-bottom:1px solid var(--line);
+  font-size:11px; letter-spacing:0.12em;
+  color:var(--amber-dim);
+}
+.topbar .tag{color:var(--amber);}
+.blinker{
+  display:inline-block; width:7px; height:11px; background:var(--amber);
+  animation:blink 1s steps(1) infinite; margin-left:2px; vertical-align:-1px;
+}
+@keyframes blink{50%{opacity:0;}}
+
+/* ============ HERO / LOADER ============ */
+.hero{
+  position:relative; z-index:5;
+  padding:clamp(40px,8vw,90px) clamp(16px,6vw,60px) clamp(30px,6vw,60px);
+  text-align:center;
+}
+.eyebrow{
+  font-size:11px; letter-spacing:0.35em; color:var(--amber-dim);
+  text-transform:uppercase; margin-bottom:18px;
+}
+h1.title{
+  font-family:'Courier Prime', monospace; font-weight:700;
+  font-size:clamp(2.4rem,8vw,5.2rem);
+  letter-spacing:0.02em;
+  color:var(--bone);
+  text-shadow:0 0 24px rgba(255,176,0,0.15);
+  line-height:1;
+}
+h1.title .layer{
+  color:var(--amber);
+  position:relative;
+}
+.subtitle{
+  margin-top:16px; color:var(--amber-dim); font-size:clamp(12px,1.6vw,15px);
+  letter-spacing:0.04em; max-width:560px; margin-left:auto; margin-right:auto;
+  line-height:1.6;
+}
+
+.loader-wrap{
+  margin:clamp(36px,6vw,56px) auto 10px; max-width:720px;
+}
+.loader-readout{
+  display:flex; justify-content:space-between; align-items:baseline;
+  font-size:12px; color:var(--amber-dim); margin-bottom:8px; letter-spacing:0.08em;
+}
+.pct{
+  font-family:'JetBrains Mono', monospace; font-weight:800;
+  font-size:clamp(2.6rem,9vw,4.4rem); color:var(--amber);
+  text-shadow:0 0 30px rgba(255,176,0,0.35);
+  line-height:1;
+}
+.bar-track{
+  position:relative;
+  height:18px; width:100%;
+  background:var(--bg-2);
+  border:1px solid var(--amber-dark);
+  overflow:hidden;
+}
+.bar-fill{
+  position:absolute; left:0; top:0; bottom:0;
+  width:7%;
+  background:linear-gradient(90deg, var(--amber-dark), var(--amber));
+  box-shadow:0 0 14px rgba(255,176,0,0.6);
+  transition:width .12s ease;
+}
+.bar-fill::after{
+  content:''; position:absolute; inset:0;
+  background:repeating-linear-gradient(-45deg, rgba(0,0,0,0.25) 0 6px, transparent 6px 12px);
+}
+.bar-status{
+  margin-top:10px; font-size:11px; color:var(--amber-dim);
+  display:flex; justify-content:space-between; letter-spacing:0.06em;
+}
+.bar-status .stalled{color:var(--blood-bright); animation:blink 1.4s steps(1) infinite;}
+
+.deny-stamp{
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) rotate(-9deg) scale(0.6);
+  border:5px solid var(--blood-bright); color:var(--blood-bright);
+  font-family:'Courier Prime', monospace; font-weight:700;
+  font-size:clamp(2rem,7vw,4rem); letter-spacing:0.15em;
+  padding:10px 26px; opacity:0; z-index:200; pointer-events:none;
+  text-shadow:0 0 20px rgba(209,54,47,0.6);
+  background:rgba(10,9,6,0.35);
+}
+.deny-stamp.show{
+  animation:stampIn 0.65s cubic-bezier(.2,1.4,.4,1) forwards;
+}
+@keyframes stampIn{
+  0%{opacity:0; transform:translate(-50%,-50%) rotate(-9deg) scale(0.4);}
+  15%{opacity:1; transform:translate(-50%,-50%) rotate(-9deg) scale(1.08);}
+  25%{transform:translate(-50%,-50%) rotate(-9deg) scale(1);}
+  75%{opacity:1;}
+  100%{opacity:0; transform:translate(-50%,-50%) rotate(-9deg) scale(1);}
+}
+
+.glitch-flash{
+  position:fixed; inset:0; background:var(--amber); opacity:0; z-index:150; pointer-events:none;
+  mix-blend-mode:difference;
+}
+.glitch-flash.active{ animation:flash 0.28s steps(2); }
+@keyframes flash{
+  0%{opacity:0.5;} 40%{opacity:0.05;} 60%{opacity:0.3;} 100%{opacity:0;}
+}
+
+/* ============ DIVIDER ============ */
+.divider{
+  position:relative; z-index:5;
+  display:flex; align-items:center; gap:14px;
+  padding:0 clamp(16px,6vw,60px); margin:clamp(30px,5vw,50px) 0 10px;
+  color:var(--amber-dim); font-size:11px; letter-spacing:0.2em;
+}
+.divider::before, .divider::after{
+  content:''; flex:1; height:1px; background:var(--line);
+}
+
+/* ============ FILE GRID ============ */
+.archive{
+  position:relative; z-index:5;
+  padding:10px clamp(16px,6vw,60px) clamp(60px,8vw,100px);
+  max-width:1200px; margin:0 auto;
+}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(250px,1fr));
+  gap:16px;
+  margin-top:20px;
+}
+.file{
+  position:relative;
+  background:linear-gradient(180deg, var(--bg-2), #0d0b07);
+  border:1px solid var(--steel);
+  padding:18px 16px 16px;
+  cursor:pointer;
+  transition:border-color .2s, transform .15s;
+  overflow:hidden;
+}
+.file:hover{
+  border-color:var(--amber-dim);
+  transform:translateY(-2px);
+}
+.file:hover .file-noise{opacity:1;}
+.file-noise{
+  position:absolute; inset:0; opacity:0; transition:opacity .2s;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode:overlay; pointer-events:none;
+}
+.file-top{
+  display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
+  font-size:10px; color:var(--amber-dim); letter-spacing:0.08em; margin-bottom:14px;
+}
+.lock-icon{
+  width:14px; height:14px; flex-shrink:0; color:var(--blood-bright);
+}
+.file-name{
+  font-family:'JetBrains Mono', monospace; font-weight:500;
+  font-size:14px; color:var(--bone); word-break:break-all; line-height:1.5;
+  min-height:42px;
+}
+.file-name .corrupt{
+  color:var(--blood-bright);
+  animation:corruptFlicker 2.4s infinite;
+}
+@keyframes corruptFlicker{
+  0%,100%{opacity:1;} 48%{opacity:1;} 50%{opacity:0.2;} 52%{opacity:1;}
+}
+.file-meta{
+  margin-top:12px; padding-top:10px; border-top:1px dashed var(--steel);
+  display:flex; justify-content:space-between; font-size:10px; color:var(--steel);
+}
+.file-meta .locked-tag{color:var(--blood-bright); letter-spacing:0.1em;}
+
+/* ============ MODAL ============ */
+.overlay{
+  position:fixed; inset:0; background:rgba(6,5,3,0.88);
+  backdrop-filter:blur(2px);
+  display:flex; align-items:center; justify-content:center;
+  z-index:100; opacity:0; pointer-events:none; transition:opacity .2s;
+  padding:20px;
+}
+.overlay.open{opacity:1; pointer-events:auto;}
+.modal{
+  width:100%; max-width:560px;
+  background:var(--bg-2); border:1px solid var(--blood);
+  box-shadow:0 0 60px rgba(139,26,26,0.25);
+  transform:scale(0.96); transition:transform .2s;
+  position:relative;
+}
+.overlay.open .modal{transform:scale(1);}
+.modal-head{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:12px 16px; border-bottom:1px solid var(--steel);
+  font-size:11px; letter-spacing:0.1em; color:var(--amber-dim);
+}
+.modal-close{
+  background:none; border:1px solid var(--steel); color:var(--amber-dim);
+  width:24px; height:24px; cursor:pointer; font-family:inherit;
+}
+.modal-close:hover{border-color:var(--blood-bright); color:var(--blood-bright);}
+.modal-body{padding:22px 20px 26px;}
+.modal-file{
+  font-size:15px; color:var(--bone); margin-bottom:14px; word-break:break-all;
+}
+.hexdump{
+  font-size:10.5px; line-height:1.7; color:var(--amber-dim);
+  background:#08070500; padding:12px; border:1px solid var(--steel);
+  max-height:110px; overflow:hidden; letter-spacing:0.03em;
+  white-space:pre-wrap;
+}
+.teaser{
+  margin-top:16px; font-family:'Courier Prime', monospace; font-size:13px;
+  color:var(--amber); line-height:1.7; border-left:2px solid var(--blood);
+  padding-left:12px; min-height:44px;
+}
+.modal-denied{
+  margin-top:20px; display:flex; align-items:center; gap:10px;
+  color:var(--blood-bright); font-size:12px; letter-spacing:0.1em;
+}
+.modal-progress{
+  margin-top:16px; font-size:11px; color:var(--steel);
+}
+.modal-progress .track{
+  height:6px; background:#000; border:1px solid var(--steel); margin-top:6px;
+}
+.modal-progress .fill{
+  height:100%; width:7%; background:var(--blood-bright);
+}
+
+/* ============ FOOTER ============ */
+footer{
+  position:relative; z-index:5;
+  border-top:1px solid var(--line);
+  padding:20px clamp(16px,6vw,40px);
+  display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  font-size:10px; color:var(--steel); letter-spacing:0.1em;
+}
+
+@media (max-width:520px){
+  .loader-readout{flex-direction:column; gap:4px;}
+  footer{flex-direction:column;}
+}
+
+::selection{background:var(--amber); color:#000;}
+</style>
+</head>
+<body>
+
+<div class="grain"></div>
+<div class="scanlines"></div>
+<div class="vignette"></div>
+<div class="glitch-flash" id="glitchFlash"></div>
+<div class="deny-stamp" id="denyStamp">ACCESO<br>DENEGADO</div>
+
+<div class="topbar">
+  <div><span class="tag">MEMORY_LAYER</span> // NODO_04 // TRANSMEDIA</div>
+  <div>ESTADO: <span style="color:var(--blood-bright)">NO_SINCRONIZADO</span><span class="blinker"></span></div>
+</div>
+
+<section class="hero">
+  <div class="eyebrow">expediente en reconstrucción</div>
+  <h1 class="title">MEMORY <span class="layer">LAYER</span></h1>
+  <p class="subtitle">Alguien archivó estos recuerdos antes de que se perdieran. El sistema los está reconstruyendo — pero algo, o alguien, está frenando el proceso.</p>
+
+  <div class="loader-wrap">
+    <div class="loader-readout">
+      <span>SINCRONIZANDO MEMORIA</span>
+      <span id="statusRight">INTENTO <span id="attemptCount">000</span></span>
+    </div>
+    <div class="pct" id="pctReadout">07%</div>
+    <div class="bar-track">
+      <div class="bar-fill" id="barFill"></div>
+    </div>
+    <div class="bar-status">
+      <span class="stalled">⚠ PROCESO ESTANCADO</span>
+      <span>0% ────── <span style="color:var(--amber)">7%</span> ────── 100%</span>
+    </div>
+  </div>
+</section>
+
+<div class="divider">ARCHIVOS RECUPERADOS · TODOS BLOQUEADOS</div>
+
+<section class="archive">
+  <div class="grid" id="fileGrid"></div>
+</section>
+
+<footer>
+  <span>MEMORY_LAYER © 2026 — TRANSMISIÓN EN CURSO</span>
+  <span id="clock">04:17:33 — REGISTRO ACTIVO</span>
+</footer>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <span id="modalTitle">ARCHIVO.dat</span>
+      <button class="modal-close" id="modalClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-file" id="modalFile">/memoria/███████.frag</div>
+      <div class="hexdump" id="modalHex"></div>
+      <div class="teaser" id="modalTeaser">Cargando fragmento...</div>
+      <div class="modal-denied">🔒 <span>ACCESO DENEGADO — SINCRONIZACIÓN INSUFICIENTE</span></div>
+      <div class="modal-progress">
+        REQUERIDO PARA DESBLOQUEAR: 100% · ACTUAL: 7%
+        <div class="track"><div class="fill"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const files = [
+  {name:"SUJETO_07_recuer█o.frag", teaser:"...no recuerdo haber cerrado la puerta. alguien más la cerró por mí..."},
+  {name:"linea_tempora[ERROR].dat", teaser:"las fechas no coinciden. el 14 de marzo ocurrió dos veces."},
+  {name:"testimonio_04.cor", teaser:"dice que no es la primera vez que despierta en un lugar distinto."},
+  {name:"audio_███████.wav", teaser:"[ 00:03 ] una voz repite el mismo nombre. no es el suyo."},
+  {name:"mapa_neura1_incompl.sys", teaser:"faltan tres nodos. los tres corresponden a la misma persona."},
+  {name:"archivo_eliminado_19.tmp", teaser:"marcado para borrado. alguien lo recuperó antes de tiempo."},
+  {name:"perfil_B.██████", teaser:"el nombre fue sobrescrito cuatro veces en el mismo registro."},
+  {name:"registro_sueño_02.log", teaser:"la misma habitación. la misma hora. la misma advertencia."},
+];
+
+const grid = document.getElementById('fileGrid');
+const hexChars = "0123456789ABCDEF";
+function randomHex(lines){
+  let out = "";
+  for(let l=0; l<lines; l++){
+    let row = "";
+    for(let i=0;i<24;i++){ row += hexChars[Math.floor(Math.random()*16)]; if(i%2) row+=" "; }
+    out += row + "\n";
+  }
+  return out;
+}
+
+files.forEach((f, idx) => {
+  const el = document.createElement('div');
+  el.className = 'file';
+  const displayName = f.name.replace(/█+/g, m => `<span class="corrupt">${m}</span>`);
+  el.innerHTML = `
+    <div class="file-noise"></div>
+    <div class="file-top">
+      <span>ID_${String(idx+1).padStart(3,'0')}</span>
+      <svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="1"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+    </div>
+    <div class="file-name">${displayName}</div>
+    <div class="file-meta">
+      <span>${(Math.random()*900+80).toFixed(0)} KB</span>
+      <span class="locked-tag">BLOQUEADO</span>
+    </div>
+  `;
+  el.addEventListener('click', () => openFile(f));
+  grid.appendChild(el);
+});
+
+const overlay = document.getElementById('overlay');
+const modalTitle = document.getElementById('modalTitle');
+const modalFile = document.getElementById('modalFile');
+const modalHex = document.getElementById('modalHex');
+const modalTeaser = document.getElementById('modalTeaser');
+const glitchFlash = document.getElementById('glitchFlash');
+const denyStamp = document.getElementById('denyStamp');
+const barFill = document.getElementById('barFill');
+const pctReadout = document.getElementById('pctReadout');
+const attemptCount = document.getElementById('attemptCount');
+
+let attempts = 0;
+
+function openFile(f){
+  modalTitle.textContent = f.name.replace(/█/g,'▓');
+  modalFile.textContent = "/memoria/" + f.name;
+  modalHex.textContent = randomHex(5);
+  modalTeaser.textContent = f.teaser;
+  overlay.classList.add('open');
+  triggerDenial();
+}
+
+document.getElementById('modalClose').addEventListener('click', () => {
+  overlay.classList.remove('open');
+});
+overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.classList.remove('open'); });
+
+function triggerDenial(){
+  attempts++;
+  attemptCount.textContent = String(attempts).padStart(3,'0');
+
+  // bar stutters down then snaps back to 7%
+  const fakeDrop = (Math.random()*4 + 1).toFixed(1);
+  barFill.style.transition = 'width .08s linear';
+  barFill.style.width = fakeDrop + '%';
+  pctReadout.textContent = Math.floor(fakeDrop) + '%';
+
+  glitchFlash.classList.remove('active'); void glitchFlash.offsetWidth; glitchFlash.classList.add('active');
+  denyStamp.classList.remove('show'); void denyStamp.offsetWidth; denyStamp.classList.add('show');
+
+  setTimeout(() => {
+    barFill.style.transition = 'width .5s cubic-bezier(.3,1.6,.4,1)';
+    barFill.style.width = '7%';
+    pctReadout.textContent = '07%';
+  }, 260);
+}
+
+// ambient bar jitter
+setInterval(() => {
+  const jitter = 6.6 + Math.random()*0.8;
+  barFill.style.transition = 'width .3s ease';
+  barFill.style.width = jitter.toFixed(1) + '%';
+}, 3200);
+
+// random ambient full-screen glitch
+setInterval(() => {
+  if(Math.random() > 0.7){
+    glitchFlash.classList.remove('active'); void glitchFlash.offsetWidth; glitchFlash.classList.add('active');
+  }
+}, 5000);
+
+// fake clock
+const clockEl = document.getElementById('clock');
+function tick(){
+  const n = new Date();
+  const h = String(n.getHours()).padStart(2,'0');
+  const m = String(n.getMinutes()).padStart(2,'0');
+  const s = String(n.getSeconds()).padStart(2,'0');
+  clockEl.textContent = `${h}:${m}:${s} — REGISTRO ACTIVO`;
+}
+tick(); setInterval(tick, 1000);
+</script>
+
+</body>
+</html>
